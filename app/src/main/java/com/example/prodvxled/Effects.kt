@@ -16,7 +16,7 @@ object Effects {
     val NAMES = listOf(
         "Solid", "Blink", "Breathe", "Wipe", "Rainbow", "Scan", "Dual Scan",
         "Fade", "Running", "Twinkle", "Sparkle", "Strobe", "Chase", "Fireworks",
-        "Rain", "Fire Flicker", "Gradient", "Fire 2012", "Meteor",
+        "Rain", "Fire Flicker", "Gradient", "Fire 2012", "Meteor", "Palette",
     )
 
     val FX_COUNT = NAMES.size
@@ -115,7 +115,10 @@ object Effects {
         val t = now / 1000f * spd
 
         when (seg.fx) {
-            0 -> fill(buf, start, stop, c[0])   // solid
+            0 -> {  // solid; with a palette active show it as a static gradient
+                if (seg.pal == 0) fill(buf, start, stop, c[0])
+                else for (i in 0 until len) buf[start + i] = palColor(seg.pal, i.toFloat() / max(1, len - 1), c)
+            }
 
             1 -> fill(buf, start, stop, if ((t * 2).toInt() % 2 == 0) c[0] else c[1])   // blink
 
@@ -235,6 +238,9 @@ object Effects {
                     if (d in 0..tail) buf[start + i] = mix(c[1], pcol(seg, i.toFloat() / len), 1f - d.toFloat() / (tail + 1))
                 }
             }
+
+            19 -> for (i in 0 until len) buf[start + i] =   // palette: show palette as gradient
+                palColor(seg.pal, i.toFloat() / max(1, len - 1), c)
 
             else -> fill(buf, start, stop, c[0])
         }

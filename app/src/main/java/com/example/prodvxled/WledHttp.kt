@@ -71,7 +71,8 @@ class WledHttp(port: Int) : NanoWSD(port) {
                 fixed(Response.Status.OK, "text/html", "<html><body>No settings on this device.</body></html>")
             else -> fixed(Response.Status.NOT_FOUND, "text/plain", "Not found: ${session.uri}")
         }
-        logReq("${session.method} ${session.uri} -> ${resp.status.description} ${(System.nanoTime() - t0) / 1_000_000}ms")
+        val bodyStr = body?.toString()?.take(160)?.let { " $it" } ?: ""
+        logReq("${session.method} ${session.uri}$bodyStr -> ${resp.status.description} ${(System.nanoTime() - t0) / 1_000_000}ms")
         return cors(resp)
     }
 
@@ -228,6 +229,7 @@ button,input,select{font-size:1.1em;padding:.5em;margin:.3em 0;width:100%;box-si
 <label>Brightness <input id=bri type=range min=1 max=255 onchange="set('bri',+this.value)"></label>
 <label>Color <input id=col type=color value="#ffa000" onchange="col_(this.value)"></label>
 <label>Effect <select id=fx onchange="seg({fx:+this.value})"></select></label>
+<label>Palette <select id=pal onchange="seg({pal:+this.value})"></select></label>
 <label>Speed <input id=sx type=range max=255 onchange="seg({sx:+this.value})"></label>
 <pre id=st></pre>
 <script>
@@ -238,9 +240,11 @@ function col_(h){let r=parseInt(h.substr(1,2),16),g=parseInt(h.substr(3,2),16),b
 async function poll(){try{
  let j=await(await fetch('/json/state')).json();
  let e=await(await fetch('/json/effects')).json();
- let fx=document.getElementById('fx');
- if(!fx.options.length){e.forEach((n,i)=>{if(n!='RSVD')fx.add(new Option(n,i))})}
- fx.value=j.seg[0].fx;document.getElementById('bri').value=j.bri;
+ let p=await(await fetch('/json/palettes')).json();
+ let fx=document.getElementById('fx'),pal=document.getElementById('pal');
+ if(!fx.options.length){e.forEach((n,i)=>fx.add(new Option(n,i)))}
+ if(!pal.options.length){p.forEach((n,i)=>pal.add(new Option(n,i)))}
+ fx.value=j.seg[0].fx;pal.value=j.seg[0].pal;document.getElementById('bri').value=j.bri;
  document.getElementById('st').textContent=JSON.stringify(j.seg[0],null,1);
 }catch(x){}}
 poll();setInterval(poll,3000);

@@ -68,9 +68,16 @@ class WledService : Service() {
         // 2) otherwise run on :8080 and ask root to redirect :80 -> :8080
         WledState.statusText = "API: starting"
         Thread({
-            if (!tryBind(80)) {
-                redirectPort80()
-                tryBind(HTTP_PORT)
+            if (tryBind(80)) {
+                port80Method = "direct"
+            } else if (tryBind(HTTP_PORT)) {
+                // kernel-level redirect first; if the kernel lacks NAT/REDIRECT
+                // fall back to a root TCP proxy via app_process
+                port80Method = when {
+                    redirectPort80() -> "iptables"
+                    startRootProxy() -> "rootproxy"
+                    else -> "none"
+                }
             }
             if (http == null) {
                 WledState.statusText = "HTTP failed to start"
@@ -98,6 +105,7 @@ class WledService : Service() {
     // ---------- status ----------
 
     private var port80Probe: Boolean? = null   // null = not tested yet
+    private var port80Method = "none"          // direct | iptables | rootproxy | none
     private var iptablesErr: String? = null
     private var nsdOk = 0
     private var nsdFail: String? = null
@@ -106,9 +114,9 @@ class WledService : Service() {
         val parts = mutableListOf("API: http://$localIp${if (httpPort != 80) ":$httpPort" else ""}")
         if (httpPort == 80) parts += "port 80 direct"
         else when (port80Probe) {
-            true -> parts += ":80 via redirect"
+            true -> parts += ":80 via $port80Method"
             false -> parts += ":80 unreachable${iptablesErr?.let { " ($it)" } ?: ""}"
-            null -> parts += ":80 probing"
+            null -> parts += ":80 probing ($port80Method)"
         }
         parts += when {
             nsdFail != null -> "mDNS fail: $nsdFail"
@@ -134,6 +142,7 @@ class WledService : Service() {
         engine?.interrupt(); udp?.interrupt()
         try { udpSocket?.close() } catch (_: Exception) { }
         try { http?.stop() } catch (_: Exception) { }
+        try { rootProxy?.destroy() } catch (_: Exception) { }
         pipe.close()
         nsdRegs.forEach { try { (getSystemService(NSD_SERVICE) as NsdManager).unregisterService(it) } catch (_: Exception) { } }
         try { multicastLock?.release() } catch (_: Exception) { }
@@ -299,6 +308,31 @@ class WledService : Service() {
             if (c1 != 0) iptablesErr = (o1.ifEmpty { "exit $c1" }).take(80)
             c1 == 0
         } catch (e: Exception) { iptablesErr = e.message; false }
+    }
+
+    private var rootProxy: Process? = null
+
+    /**
+     * Fallback when iptables/NAT is unavailable: run a TCP :80 -> :8080 relay
+     * as root via app_process (loads a class straight from our APK - the same
+     * trick Shizuku uses).
+     */
+    private fun startRootProxy(): Boolean {
+        if (!WledState.useRoot) return false
+        return try {
+            val apk = applicationInfo.sourceDir
+            val p = ProcessBuilder("su", "-c",
+                "CLASSPATH='$apk' exec app_process /system/bin com.example.prodvxled.RootProxy 80 $HTTP_PORT")
+                .redirectErrorStream(true).start()
+            rootProxy = p
+            // drain output so a chatty JVM can't deadlock on a full pipe
+            Thread { try { p.inputStream.bufferedReader().forEachLine { } } catch (_: Exception) { } }
+                .apply { isDaemon = true; start() }
+            true
+        } catch (e: Exception) {
+            iptablesErr = e.message
+            false
+        }
     }
 
     private fun findIp(): String = try {

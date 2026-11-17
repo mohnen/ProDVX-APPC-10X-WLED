@@ -23,7 +23,9 @@ them over **HTTP on port 80** — the port is not negotiable. At startup the app
 
 1. tries to bind `:80` directly (works if the kernel allows unprivileged low ports),
 2. falls back to `:8080` plus an `iptables` NAT redirect `:80 -> :8080` via `su`,
-3. self-tests `http://<ip>:80` and shows the result in the app status line.
+3. if `iptables`/NAT is unavailable, spawns a tiny TCP relay as root via
+   `app_process` (`RootProxy`), which binds `:80` and forwards to `127.0.0.1:8080`,
+4. self-tests `http://<ip>:80` and shows the result in the app status line.
 
 If the status line says "`:80` not reachable, discovery limited", the device can
 still be used by IP (`http://<ip>:8080`) but won't appear in discovery lists.

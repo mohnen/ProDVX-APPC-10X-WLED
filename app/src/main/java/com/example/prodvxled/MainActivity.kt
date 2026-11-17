@@ -17,35 +17,8 @@ import android.widget.TextView
 
 class MainActivity : Activity() {
 
-    private class Preset(val name: String, val swatch: Int, val colors: () -> IntArray)
-
-    private fun solid(c: Int) = { IntArray(LedController.LED_COUNT) { c } }
-
-    private fun sides(c: Int, vararg names: String) = {
-        val arr = IntArray(LedController.LED_COUNT)
-        names.forEach { n -> LedController.SIDES[n]?.forEach { arr[it] = c } }
-        arr
-    }
-
-    // Edit this list to change the available presets.
-    private val presets = listOf(
-        Preset("Off", 0xFF303030.toInt(), solid(0)),
-        Preset("White", 0xFFFFFFFF.toInt(), solid(0xFFFFFF)),
-        Preset("Warm white", 0xFFFFB46B.toInt(), solid(0xFFB46B)),
-        Preset("Red", 0xFFFF0000.toInt(), solid(0xFF0000)),
-        Preset("Green", 0xFF00C000.toInt(), solid(0x00FF00)),
-        Preset("Blue", 0xFF2040FF.toInt(), solid(0x0000FF)),
-        Preset("Amber", 0xFFFF8000.toInt(), solid(0xFF8000)),
-        Preset("Purple", 0xFF9030FF.toInt(), solid(0x8000FF)),
-        Preset("Sides white", 0xFFB0B0B0.toInt(), sides(0xFFFFFF, "left", "right")),
-        Preset("Top/bottom blue", 0xFF2060C0.toInt(), sides(0x0000FF, "top", "bottom")),
-        Preset("Rainbow", 0xFFD040A0.toInt(), {
-            IntArray(LedController.LED_COUNT) {
-                Color.HSVToColor(floatArrayOf(it * 360f / LedController.LED_COUNT, 1f, 1f)) and 0xFFFFFF
-            }
-        }),
-        Preset("Night light", 0xFF503010.toInt(), solid(0x502800)),
-    )
+    // Edit the shared list in Presets.kt to change the available presets.
+    private val presets = Presets.list
 
     private lateinit var prefs: SharedPreferences
     private lateinit var status: TextView

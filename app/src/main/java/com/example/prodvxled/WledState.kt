@@ -125,6 +125,11 @@ object WledState {
         if (o.has("on")) { on = o.getBoolean("on"); changed = true }
         if (o.has("bri")) { bri = o.getInt("bri").coerceIn(0, 255); changed = true }
         if (o.has("transition")) { transition = o.getInt("transition").coerceIn(0, 255) }
+        // preset recall (id >= 1); local pattern presets, not segment-based
+        if (o.has("ps")) {
+            val id = o.getInt("ps")
+            Presets.list.getOrNull(id - 1)?.let { setCustom(it.colors()); changed = true }
+        }
         val segs = o.optJSONArray("seg")
         if (segs != null && segs.length() > 0) {
             // explicit segment config overrides the manual preset pattern

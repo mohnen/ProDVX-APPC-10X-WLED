@@ -62,7 +62,7 @@ class WledHttp(port: Int) : NanoWSD(port) {
                 uri == "/json/eff" || uri == "/json/effects" ||
                 uri == "/json/pal" || uri == "/json/palettes" || uri == "/json/nodes" ||
                 uri == "/json/si" || uri == "/json/cfg" || uri == "/json/fxdata" ||
-                uri == "/presets.json" ->
+                uri == "/presets.json" || uri == "/playlists.json" ->
                 serveJson(uri, body, params)
             // legacy API: GET /win&T=2&A=255 (params inside the path, no '?')
             uri == "/win" || uri.startsWith("/win&") ->
@@ -113,8 +113,9 @@ class WledHttp(port: Int) : NanoWSD(port) {
                     .put("age", 0).put("type", 0).put("vid", 2412190)))
             // per-effect slider metadata; "0" = no extra controls
             "/json/fxdata" -> JSONArray().apply { repeat(Effects.FX_COUNT) { put("0") } }
-            // no presets/config on this device - empty objects are valid WLED replies
-            "/presets.json", "/json/cfg" -> JSONObject()
+            "/presets.json" -> Presets.json()
+            // no config or playlists on this device - empty objects are valid
+            "/json/cfg", "/playlists.json" -> JSONObject()
             else -> Effects.palettesJson()
         }
         // bare /json returns the combined state+info+effects+palettes object,

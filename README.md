@@ -71,7 +71,7 @@ and right after app updates (`MY_PACKAGE_REPLACED`). Android requires one
 launch after a *fresh* install before background components may run; to start
 the API without opening the UI:
 
-    adb shell am startservice -n net.mohnen.prodvxled/.WledService
+    adb shell am start-foreground-service -n net.mohnen.prodvxled/.WledService
     # alternatives: broadcast to the autostart receiver, or launch once
     adb shell am broadcast -a net.mohnen.prodvxled.START_API -n net.mohnen.prodvxled/.BootReceiver -f 0x20
     adb shell am start -n net.mohnen.prodvxled/.MainActivity

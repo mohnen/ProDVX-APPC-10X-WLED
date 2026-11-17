@@ -17,7 +17,6 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.NetworkInterface
-import kotlin.math.roundToInt
 
 /**
  * Foreground service that turns the panel into a WLED device:
@@ -52,7 +51,6 @@ class WledService : Service() {
         running = true
         startForeground(1, buildNotification())
         localIp = findIp()
-        httpPort = if (redirectPort80()) 80 else HTTP_PORT
 
         engine = Thread({ engineLoop() }, "led-engine").apply { isDaemon = true; start() }
         udp = Thread({ udpLoop() }, "wled-udp").apply { isDaemon = true; start() }
@@ -65,20 +63,24 @@ class WledService : Service() {
         } catch (_: Exception) { }
 
         // WLED clients verify discovered devices via HTTP on port 80.
+        // Do all setup off the main thread: su/iptables can block.
         // 1) try binding :80 directly (works if the kernel allows unprivileged low ports)
         // 2) otherwise run on :8080 and ask root to redirect :80 -> :8080
-        var bound = tryBind(80)
-        if (!bound) {
-            bound = tryBind(HTTP_PORT)
-            if (bound && !redirectPort80()) {
-                WledState.statusText = "API on http://$localIp:$HTTP_PORT only (:80 redirect failed)"
+        WledState.statusText = "API: starting"
+        Thread({
+            if (!tryBind(80)) {
+                redirectPort80()
+                tryBind(HTTP_PORT)
             }
-        }
-        if (!bound) {
-            WledState.statusText = "HTTP failed to start"
-            return
-        }
-        Thread({ verifyPort80(); registerNsd("_wled._tcp"); registerNsd("_http._tcp") }, "wled-setup").start()
+            if (http == null) {
+                WledState.statusText = "HTTP failed to start"
+                return@Thread
+            }
+            updateStatus()
+            verifyPort80()
+            registerNsd("_wled._tcp")
+            registerNsd("_http._tcp")
+        }, "wled-setup").start()
     }
 
     private fun tryBind(port: Int): Boolean {
@@ -93,18 +95,38 @@ class WledService : Service() {
         }
     }
 
+    // ---------- status ----------
+
+    private var port80Probe: Boolean? = null   // null = not tested yet
+    private var iptablesErr: String? = null
+    private var nsdOk = 0
+    private var nsdFail: String? = null
+
+    private fun updateStatus() {
+        val parts = mutableListOf("API: http://$localIp${if (httpPort != 80) ":$httpPort" else ""}")
+        if (httpPort == 80) parts += "port 80 direct"
+        else when (port80Probe) {
+            true -> parts += ":80 via redirect"
+            false -> parts += ":80 unreachable${iptablesErr?.let { " ($it)" } ?: ""}"
+            null -> parts += ":80 probing"
+        }
+        parts += when {
+            nsdFail != null -> "mDNS fail: $nsdFail"
+            nsdOk > 0 -> "mDNS ok"
+            else -> "mDNS?"
+        }
+        WledState.statusText = parts.joinToString(" | ")
+    }
+
     /** Probe http://<ip>:80 and report what discovery clients will see. */
     private fun verifyPort80() {
         Thread.sleep(500)
-        val port80 = try {
+        port80Probe = try {
             java.net.URL("http://$localIp:80/json/info").openConnection().apply {
                 connectTimeout = 1500; readTimeout = 1500
             }.getInputStream().use { it.readBytes() }.isNotEmpty()
         } catch (e: Exception) { false }
-        WledState.statusText = if (port80 || httpPort == 80)
-            "API: http://$localIp (mDNS wled-prodvx)"
-        else
-            "API: http://$localIp:$httpPort (:80 not reachable, discovery limited)"
+        updateStatus()
     }
 
     override fun onDestroy() {
@@ -171,10 +193,6 @@ class WledService : Service() {
             }
             Thread.sleep(if (WledState.isAnimated() || transDur > 0 && t < 1f) 33 else 80)
         }
-    }
-
-    private fun updateStatus() {
-        WledState.statusText = "API: http://$localIp${if (httpPort != 80) ":$httpPort" else ""}"
     }
 
     // ---------- UDP realtime (WARLS / DRGB / DNRGB on :21324) ----------
@@ -244,14 +262,13 @@ class WledService : Service() {
             val info = NsdServiceInfo().apply {
                 serviceName = "wled-prodvx"
                 serviceType = type
-                port = httpPort
+                // advertise :80 once the redirect probe passed
+                port = if (httpPort == 80 || port80Probe == true) 80 else httpPort
             }
             val listener = object : NsdManager.RegistrationListener {
-                override fun onServiceRegistered(si: NsdServiceInfo) {
-                    WledState.statusText = "API: http://$localIp${if (httpPort != 80) ":$httpPort" else ""} (mDNS ${si.serviceName})"
-                }
+                override fun onServiceRegistered(si: NsdServiceInfo) { nsdOk++; updateStatus() }
                 override fun onRegistrationFailed(si: NsdServiceInfo, err: Int) {
-                    WledState.statusText = "mDNS $type failed (err $err) - API on :$httpPort"
+                    nsdFail = "$type err$err"; updateStatus()
                 }
                 override fun onServiceUnregistered(si: NsdServiceInfo) { }
                 override fun onUnregistrationFailed(si: NsdServiceInfo, err: Int) { }
@@ -259,21 +276,29 @@ class WledService : Service() {
             nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
             nsdRegs += listener
         } catch (e: Exception) {
-            WledState.statusText = "mDNS $type failed: ${e.message}"
+            nsdFail = "$type: ${e.message}"; updateStatus()
         }
     }
 
     // ---------- helpers ----------
 
+    private fun runRoot(cmd: String): Pair<Int, String> {
+        val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText().trim()
+        return p.waitFor() to out
+    }
+
     private fun redirectPort80(): Boolean {
-        if (!WledState.useRoot) return false
+        if (!WledState.useRoot) { iptablesErr = "root off"; return false }
         return try {
-            // PREROUTING covers LAN clients, OUTPUT covers the self-test probe
-            val cmd = "iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT; " +
-                "iptables -t nat -A OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT; " +
-                "iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT"
-            ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start().waitFor() == 0
-        } catch (e: Exception) { false }
+            // PREROUTING is what LAN clients need; OUTPUT is only for our self-test
+            val (c1, o1) = runRoot(
+                "iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT")
+            runRoot(
+                "iptables -t nat -A OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT")
+            if (c1 != 0) iptablesErr = (o1.ifEmpty { "exit $c1" }).take(80)
+            c1 == 0
+        } catch (e: Exception) { iptablesErr = e.message; false }
     }
 
     private fun findIp(): String = try {

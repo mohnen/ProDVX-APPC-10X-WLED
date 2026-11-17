@@ -42,6 +42,8 @@ class WledService : Service() {
     private var udp: Thread? = null
     private var udpSocket: DatagramSocket? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
     private val nsdRegs = mutableListOf<NsdManager.RegistrationListener>()
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -59,6 +61,19 @@ class WledService : Service() {
             val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
             multicastLock = wifi.createMulticastLock("wled").apply {
                 setReferenceCounted(true); acquire()
+            }
+            // low-latency mode: keeps WiFi responsive when the panel idles
+            wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "wled").apply {
+                setReferenceCounted(true); acquire()
+            }
+        } catch (_: Exception) { }
+        try {
+            // keep the CPU alive when the screen sleeps - a dozing panel
+            // would appear offline to polling clients
+            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            @Suppress("DEPRECATION")
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "prodvx:wled").apply {
+                acquire()
             }
         } catch (_: Exception) { }
 
@@ -146,6 +161,8 @@ class WledService : Service() {
         pipe.close()
         nsdRegs.forEach { try { (getSystemService(NSD_SERVICE) as NsdManager).unregisterService(it) } catch (_: Exception) { } }
         try { multicastLock?.release() } catch (_: Exception) { }
+        try { wifiLock?.release() } catch (_: Exception) { }
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) { }
         WledState.statusText = "server stopped"
         super.onDestroy()
     }

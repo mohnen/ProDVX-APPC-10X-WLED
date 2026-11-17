@@ -20,6 +20,18 @@ class WledHttp(port: Int) : NanoWSD(port) {
 
     private val sockets = CopyOnWriteArrayList<WebSocket>()
 
+    /** Latest-state queue drained by a single sender thread so a dead
+     *  /ws client can never block an HTTP worker. */
+    private val wsQueue = java.util.concurrent.ArrayBlockingQueue<String>(1)
+    private val wsSender = Thread({
+        while (true) {
+            try {
+                val msg = wsQueue.take()
+                for (s in sockets) try { s.send(msg) } catch (_: Exception) { sockets.remove(s) }
+            } catch (_: InterruptedException) { return@Thread }
+        }
+    }, "ws-broadcast").apply { isDaemon = true; start() }
+
     override fun serve(session: IHTTPSession): Response {
         if (session.uri == "/ws") {
             // NanoWSD validates the Upgrade header and runs the handshake;
@@ -42,7 +54,7 @@ class WledHttp(port: Int) : NanoWSD(port) {
             "/", "/index.htm", "/index.html" -> fixed(Response.Status.OK, "text/html", INDEX_HTML)
             "/favicon.ico" -> newFixedLengthResponse(Response.Status.NO_CONTENT, "", "")
             "/json", "/json/state", "/json/info", "/json/eff", "/json/effects",
-            "/json/pal", "/json/palettes" -> serveJson(uri, body, params)
+            "/json/pal", "/json/palettes", "/json/nodes" -> serveJson(uri, body, params)
             "/win", "/win/" -> serveWin(params, body)
             "/settings", "/settings/leds" -> fixed(Response.Status.OK, "text/html", "<html><body>No settings on this device.</body></html>")
             else -> fixed(Response.Status.NOT_FOUND, "text/plain", "Not found: $uri")
@@ -60,6 +72,9 @@ class WledHttp(port: Int) : NanoWSD(port) {
             "/json", "/json/state" -> WledState.stateJson()
             "/json/info" -> WledState.infoJson()
             "/json/eff", "/json/effects" -> Effects.effectsJson()
+            "/json/nodes" -> JSONObject().put("nodes", JSONArray().put(
+                JSONObject().put("name", "WLED-ProDVX").put("ip", WledService.localIp)
+                    .put("age", 0).put("type", 0).put("vid", 2412190)))
             else -> Effects.palettesJson()
         }
         // ?v= on /json returns state+info combined
@@ -129,11 +144,11 @@ class WledHttp(port: Int) : NanoWSD(port) {
         override fun onException(exception: IOException) { sockets.remove(this) }
     }
 
-    /** Push current state to all connected /ws clients. */
+    /** Queue a state push to all connected /ws clients (non-blocking). */
     fun broadcast() {
         if (sockets.isEmpty()) return
-        val msg = JSONObject().put("state", WledState.stateJson()).put("info", WledState.infoJson()).toString()
-        for (s in sockets) try { s.send(msg) } catch (_: IOException) { }
+        wsQueue.clear()   // only the latest state matters
+        wsQueue.offer(JSONObject().put("state", WledState.stateJson()).put("info", WledState.infoJson()).toString())
     }
 
     // ---------- helpers ----------
@@ -149,6 +164,9 @@ class WledHttp(port: Int) : NanoWSD(port) {
         r.addHeader("Access-Control-Allow-Origin", "*")
         r.addHeader("Access-Control-Allow-Headers", "Content-Type")
         r.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+        // real WLED closes every connection; avoids keep-alive weirdness
+        // through the root proxy relay
+        r.addHeader("Connection", "close")
         return r
     }
 

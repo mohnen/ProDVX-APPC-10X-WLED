@@ -60,7 +60,9 @@ class WledHttp(port: Int) : NanoWSD(port) {
                 reqLog.joinToString("\n"))
             uri == "/json" || uri == "/json/state" || uri == "/json/info" ||
                 uri == "/json/eff" || uri == "/json/effects" ||
-                uri == "/json/pal" || uri == "/json/palettes" || uri == "/json/nodes" ->
+                uri == "/json/pal" || uri == "/json/palettes" || uri == "/json/nodes" ||
+                uri == "/json/si" || uri == "/json/cfg" || uri == "/json/fxdata" ||
+                uri == "/presets.json" ->
                 serveJson(uri, body, params)
             // legacy API: GET /win&T=2&A=255 (params inside the path, no '?')
             uri == "/win" || uri.startsWith("/win&") ->
@@ -101,10 +103,18 @@ class WledHttp(port: Int) : NanoWSD(port) {
         val out = when (uri) {
             "/json/state" -> WledState.stateJson()
             "/json/info" -> WledState.infoJson()
+            // compact state+info polled by Home Assistant's wled client
+            "/json/si" -> JSONObject()
+                .put("state", WledState.stateJson())
+                .put("info", WledState.infoJson())
             "/json/eff", "/json/effects" -> Effects.effectsJson()
             "/json/nodes" -> JSONObject().put("nodes", JSONArray().put(
                 JSONObject().put("name", "WLED-ProDVX").put("ip", WledService.localIp)
                     .put("age", 0).put("type", 0).put("vid", 2412190)))
+            // per-effect slider metadata; "0" = no extra controls
+            "/json/fxdata" -> JSONArray().apply { repeat(Effects.FX_COUNT) { put("0") } }
+            // no presets/config on this device - empty objects are valid WLED replies
+            "/presets.json", "/json/cfg" -> JSONObject()
             else -> Effects.palettesJson()
         }
         // bare /json returns the combined state+info+effects+palettes object,

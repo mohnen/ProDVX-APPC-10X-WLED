@@ -1,7 +1,9 @@
 package com.example.prodvxled
 
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 
 /**
  * Protocol for the ProDVX LED frame (same as prodvx_led.py):
@@ -20,8 +22,12 @@ object LedController {
         "top" to (39..51).toList() + listOf(0, 1),
     )
 
-    /** colors: 52 ARGB ints (alpha ignored), level 1..15 */
-    fun buildFrame(colors: IntArray, level: Int): ByteArray {
+    /**
+     * colors: 52 packed RGB ints (0xRRGGBB), level 1..15 (global brightness nibble),
+     * dim 0..1 extra scaling applied to the RGB channels (used to smooth the coarse
+     * 15-step global brightness into a continuous 0..255 WLED brightness).
+     */
+    fun buildFrame(colors: IntArray, level: Int, dim: Float = 1f): ByteArray {
         require(colors.size == LED_COUNT)
         val l = 0xF0 + level.coerceIn(1, 15)
         val out = ByteArray(2 + LED_COUNT * 4 + 1)
@@ -30,14 +36,15 @@ object LedController {
         colors.forEachIndexed { i, c ->
             val o = 2 + i * 4
             out[o] = l.toByte()
-            out[o + 1] = scale(c and 0xFF)          // B
-            out[o + 2] = scale((c shr 16) and 0xFF) // R
-            out[o + 3] = scale((c shr 8) and 0xFF)  // G
+            out[o + 1] = scale(((c) and 0xFF) * dim)          // B
+            out[o + 2] = scale(((c shr 16) and 0xFF) * dim)   // R
+            out[o + 3] = scale(((c shr 8) and 0xFF) * dim)    // G
         }
         out[out.size - 1] = 0x88.toByte()
         return out
     }
 
+    private fun scale(v: Float): Byte = (v * CMAX / 255f + 0.5f).toInt().coerceIn(0, CMAX).toByte()
     private fun scale(v: Int): Byte = ((v * CMAX + 127) / 255).toByte()
 
     /** Blocking. Returns null on success, otherwise an error message. Call off the main thread. */
@@ -56,6 +63,52 @@ object LedController {
             if (code == 0) null else "Exit code $code${if (output.isNotEmpty()) ": $output" else ""}"
         } catch (e: IOException) {
             e.message ?: "I/O error"
+        }
+    }
+
+    /**
+     * Persistent writer: keeps `cat > DEVICE` alive so frames can be pushed
+     * back-to-back (needed for effects/realtime at ~30fps where spawning a
+     * process per frame would be far too slow).
+     */
+    class Pipe(private val device: String = DEVICE) {
+        @Volatile var useRoot: Boolean = true
+            set(v) { if (v != field) { field = v; close() } }
+
+        private var proc: Process? = null
+        private var out: OutputStream? = null
+
+        @Synchronized
+        fun write(frame: ByteArray): String? = try {
+            ensure()
+            out!!.write(frame)
+            out!!.flush()
+            null
+        } catch (e: Exception) {
+            close()
+            e.message ?: "write failed"
+        }
+
+        private fun ensure() {
+            val p = proc
+            if (p != null && p.isAlive && out != null) return
+            close()
+            val sh = if (useRoot) "su" else "sh"
+            try {
+                ProcessBuilder(sh, "-c", "stty -F $device 115200 raw -echo")
+                    .redirectErrorStream(true).start().waitFor()
+            } catch (_: Exception) { }
+            proc = ProcessBuilder(sh, "-c", "cat > $device")
+                .redirectErrorStream(true).start()
+            out = BufferedOutputStream(proc!!.outputStream, 64 * 1024)
+        }
+
+        @Synchronized
+        fun close() {
+            try { out?.close() } catch (_: Exception) { }
+            try { proc?.destroy() } catch (_: Exception) { }
+            proc = null
+            out = null
         }
     }
 }

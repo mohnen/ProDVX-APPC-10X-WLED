@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -12,7 +14,6 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
-import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
 
@@ -40,34 +41,44 @@ class MainActivity : Activity() {
         Preset("Top/bottom blue", 0xFF2060C0.toInt(), sides(0x0000FF, "top", "bottom")),
         Preset("Rainbow", 0xFFD040A0.toInt(), {
             IntArray(LedController.LED_COUNT) {
-                Color.HSVToColor(floatArrayOf(it * 360f / LedController.LED_COUNT, 1f, 1f))
+                Color.HSVToColor(floatArrayOf(it * 360f / LedController.LED_COUNT, 1f, 1f)) and 0xFFFFFF
             }
         }),
         Preset("Night light", 0xFF503010.toInt(), solid(0x502800)),
     )
 
-    private val io = Executors.newSingleThreadExecutor()
     private lateinit var prefs: SharedPreferences
     private lateinit var status: TextView
     private lateinit var levelLabel: TextView
     private val buttons = mutableListOf<Button>()
     private var selected = -1
-    private var level = 11
     private var useRoot = true
+    private val handler = Handler(Looper.getMainLooper())
+
+    private val statusPoll = object : Runnable {
+        override fun run() {
+            if (::status.isInitialized) status.text = WledState.statusText
+            handler.postDelayed(this, 700)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("led", MODE_PRIVATE)
         selected = prefs.getInt("preset", -1).takeIf { it in presets.indices } ?: -1
-        level = prefs.getInt("level", 11).coerceIn(1, 15)
+        WledState.bri = prefs.getInt("level", 11).coerceIn(1, 15) * 17
         useRoot = prefs.getBoolean("root", true)
+        WledState.useRoot = useRoot
         setContentView(buildUi())
         refreshButtons()
+
+        if (prefs.getBoolean("server", true)) WledService.start(this)
+        handler.post(statusPoll)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        io.shutdown()
+        handler.removeCallbacks(statusPoll)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -109,26 +120,36 @@ class MainActivity : Activity() {
         updateLevelLabel()
         root.addView(SeekBar(this).apply {
             max = 14
-            progress = level - 1
+            progress = WledState.bri / 17 - 1
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
-                    level = p + 1
+                    if (fromUser) { WledState.bri = (p + 1) * 17; WledState.touch() }
                     updateLevelLabel()
                 }
                 override fun onStartTrackingTouch(s: SeekBar) {}
                 override fun onStopTrackingTouch(s: SeekBar) {
-                    prefs.edit().putInt("level", level).apply()
-                    if (selected >= 0) apply(selected)
+                    prefs.edit().putInt("level", p + 1).apply()
                 }
             })
         }, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
 
         root.addView(Switch(this).apply {
+            text = "WLED API server (HTTP :80, UDP :21324, mDNS)"
+            isChecked = prefs.getBoolean("server", true)
+            setPadding(0, dp(16), 0, 0)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean("server", checked).apply()
+                if (checked) WledService.start(this@MainActivity) else WledService.stop(this@MainActivity)
+            }
+        })
+
+        root.addView(Switch(this).apply {
             text = "Use root (su) to write to /dev/ttyS1"
             isChecked = useRoot
-            setPadding(0, dp(16), 0, dp(8))
+            setPadding(0, dp(4), 0, dp(8))
             setOnCheckedChangeListener { _, checked ->
                 useRoot = checked
+                WledState.useRoot = checked
                 prefs.edit().putBoolean("root", checked).apply()
             }
         })
@@ -136,7 +157,7 @@ class MainActivity : Activity() {
         status = TextView(this).apply {
             textSize = 14f
             gravity = Gravity.START
-            text = "Ready"
+            text = WledState.statusText
         }
         root.addView(status)
 
@@ -149,12 +170,12 @@ class MainActivity : Activity() {
     }
 
     private fun updateLevelLabel() {
-        levelLabel.text = "Brightness: $level / 15"
+        levelLabel.text = "Brightness: ${WledState.bri / 17} / 15"
     }
 
     private fun refreshButtons() {
         buttons.forEachIndexed { i, b ->
-            b.text = if (i == selected) "\u2713 ${presets[i].name}" else presets[i].name
+            b.text = if (i == selected) "✓ ${presets[i].name}" else presets[i].name
         }
     }
 
@@ -162,15 +183,7 @@ class MainActivity : Activity() {
         selected = index
         prefs.edit().putInt("preset", index).apply()
         refreshButtons()
-        val frame = LedController.buildFrame(presets[index].colors(), level)
-        val root = useRoot
-        val dir = cacheDir
-        status.text = "Sending \u201c${presets[index].name}\u201d\u2026"
-        io.execute {
-            val err = LedController.send(dir, frame, root)
-            runOnUiThread {
-                status.text = err?.let { "Error: $it" } ?: "Applied \u201c${presets[index].name}\u201d"
-            }
-        }
+        WledState.setCustom(presets[index].colors())
+        status.text = "Applied “${presets[index].name}”"
     }
 }

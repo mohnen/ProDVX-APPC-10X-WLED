@@ -11,7 +11,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="LED Presets"
+        android:label="WLED ProDVX"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
         <activity

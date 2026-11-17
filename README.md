@@ -60,11 +60,11 @@ Option B - command line (JDK 17 + Android SDK, Gradle 8.7+):
 
 Option C - push to GitHub; the included workflow builds the APK (Actions > artifact).
 
-Output: `app/build/outputs/apk/debug/app-debug.apk` (debug-signed, installable)
+Output: `app/build/outputs/apk/debug/WLED-ProDVX.apk` (debug-signed, installable)
 
 ## Install
 
-    adb install -r app-debug.apk
+    adb install -r WLED-ProDVX.apk
 
 The API service autostarts on boot (`BOOT_COMPLETED` / `QUICKBOOT_POWERON`)
 and right after app updates (`MY_PACKAGE_REPLACED`). Android requires one

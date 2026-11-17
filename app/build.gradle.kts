@@ -26,6 +26,12 @@ android {
         versionName = "1.0"
     }
 
+    applicationVariants.all {
+        outputs.all {
+            outputFileName = "WLED-ProDVX.apk"
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

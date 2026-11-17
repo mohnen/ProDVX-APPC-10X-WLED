@@ -38,6 +38,9 @@ object WledState {
     @Volatile var liveLeds: IntArray? = null
     @Volatile var liveUntil = 0L
 
+    /** Last applied preset id (1-based, -1 = none). Reported as state.ps. */
+    @Volatile var activePreset = -1
+
     /** Set by frontends to request a re-render. */
     @Volatile var dirty = true
 
@@ -55,11 +58,12 @@ object WledState {
 
     fun touch() { dirty = true }
 
-    /** Preset buttons: show a fixed per-LED pattern. */
-    fun setCustom(colors: IntArray) {
+    /** Preset buttons / ps recall: show a fixed per-LED pattern. */
+    fun setCustom(colors: IntArray, presetId: Int = -1) {
         customLeds = colors.copyOf()
         seg.fx = 0
         on = true
+        activePreset = presetId
         touch()
     }
 
@@ -90,7 +94,7 @@ object WledState {
         .put("on", on)
         .put("bri", bri)
         .put("transition", transition)
-        .put("ps", -1).put("pl", -1)
+        .put("ps", activePreset).put("pl", -1)
         .put("nl", JSONObject().put("on", false).put("dur", 60).put("mode", 1).put("tbri", 0).put("rem", -1))
         .put("udpn", JSONObject().put("send", false).put("recv", true).put("sgrp", 1).put("rgrp", 1))
         .put("lor", if (isLive) 1 else 0)
@@ -128,12 +132,13 @@ object WledState {
         // preset recall (id >= 1); local pattern presets, not segment-based
         if (o.has("ps")) {
             val id = o.getInt("ps")
-            Presets.list.getOrNull(id - 1)?.let { setCustom(it.colors()); changed = true }
+            Presets.list.getOrNull(id - 1)?.let { setCustom(it.colors(), id); changed = true }
         }
         val segs = o.optJSONArray("seg")
         if (segs != null && segs.length() > 0) {
             // explicit segment config overrides the manual preset pattern
             customLeds = null
+            activePreset = -1
             val s = segs.getJSONObject(0)   // single segment supported
             if (s.has("start")) { seg.start = s.getInt("start").coerceIn(0, LED_COUNT); changed = true }
             if (s.has("stop")) { seg.stop = s.getInt("stop").coerceIn(seg.start, LED_COUNT); changed = true }

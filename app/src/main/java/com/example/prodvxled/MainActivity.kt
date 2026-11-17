@@ -156,7 +156,7 @@ class MainActivity : Activity() {
         selected = index
         prefs.edit().putInt("preset", index).apply()
         refreshButtons()
-        WledState.setCustom(presets[index].colors())
+        WledState.setCustom(presets[index].colors(), index + 1)
         status.text = "Applied “${presets[index].name}”"
     }
 }

@@ -48,25 +48,35 @@ class WledHttp(port: Int) : NanoWSD(port) {
                 files["postData"]?.takeIf { it.isNotBlank() }?.let { body = JSONObject(it) }
             } catch (e: Exception) { /* non-JSON or empty body is fine for /win */ }
         }
-        val uri = session.uri
+        val uri = session.uri.removeSuffix("/").ifEmpty { "/" }
         val params = session.parms + legacyParams(uri)
 
+        val t0 = System.nanoTime()
         val resp = when {
             uri == "/" || uri == "/index.htm" || uri == "/index.html" ->
                 fixed(Response.Status.OK, "text/html", INDEX_HTML)
             uri == "/favicon.ico" -> newFixedLengthResponse(Response.Status.NO_CONTENT, "", "")
+            uri == "/log" -> fixed(Response.Status.OK, "text/plain",
+                reqLog.joinToString("\n"))
             uri == "/json" || uri == "/json/state" || uri == "/json/info" ||
                 uri == "/json/eff" || uri == "/json/effects" ||
                 uri == "/json/pal" || uri == "/json/palettes" || uri == "/json/nodes" ->
                 serveJson(uri, body, params)
             // legacy API: GET /win&T=2&A=255 (params inside the path, no '?')
-            uri == "/win" || uri == "/win/" || uri.startsWith("/win&") ->
+            uri == "/win" || uri.startsWith("/win&") ->
                 serveWin(params, body)
             uri == "/settings" || uri == "/settings/leds" ->
                 fixed(Response.Status.OK, "text/html", "<html><body>No settings on this device.</body></html>")
-            else -> fixed(Response.Status.NOT_FOUND, "text/plain", "Not found: $uri")
+            else -> fixed(Response.Status.NOT_FOUND, "text/plain", "Not found: ${session.uri}")
         }
+        logReq("${session.method} ${session.uri} -> ${resp.status.description} ${(System.nanoTime() - t0) / 1_000_000}ms")
         return cors(resp)
+    }
+
+    private val reqLog = java.util.concurrent.ConcurrentLinkedDeque<String>()
+    private fun logReq(line: String) {
+        reqLog.addLast("${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())} $line")
+        while (reqLog.size > 60) reqLog.pollFirst()
     }
 
     /** WLED's /win API puts params in the path: "/win&T=2&A=255". */
@@ -89,7 +99,7 @@ class WledHttp(port: Int) : NanoWSD(port) {
             if (!body.optBoolean("v", false)) return json(JSONObject().put("success", true))
         }
         val out = when (uri) {
-            "/json", "/json/state" -> WledState.stateJson()
+            "/json/state" -> WledState.stateJson()
             "/json/info" -> WledState.infoJson()
             "/json/eff", "/json/effects" -> Effects.effectsJson()
             "/json/nodes" -> JSONObject().put("nodes", JSONArray().put(
@@ -97,8 +107,9 @@ class WledHttp(port: Int) : NanoWSD(port) {
                     .put("age", 0).put("type", 0).put("vid", 2412190)))
             else -> Effects.palettesJson()
         }
-        // ?v= on /json returns state+info combined
-        if (uri == "/json" && params["v"] != null) {
+        // bare /json returns the combined state+info+effects+palettes object,
+        // like real WLED (Home Assistant's client requests GET /json/)
+        if (uri == "/json") {
             return json(JSONObject()
                 .put("state", WledState.stateJson())
                 .put("info", WledState.infoJson())

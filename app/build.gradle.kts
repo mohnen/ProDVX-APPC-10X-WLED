@@ -7,6 +7,17 @@ android {
     namespace = "com.example.prodvxled"
     compileSdk = 34
 
+    signingConfigs {
+        // committed debug keystore -> all builds share one signature so
+        // `adb install -r` updates work regardless of which machine built the APK
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.prodvxled"
         minSdk = 28          // Android 9

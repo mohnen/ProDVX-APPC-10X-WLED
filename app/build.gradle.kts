@@ -28,7 +28,10 @@ android {
 
     applicationVariants.all {
         outputs.all {
-            outputFileName = "WLED-ProDVX.apk"
+            // outputFileName setter lives on the internal impl class
+            if (this is com.android.build.gradle.internal.api.ApkVariantOutputImpl) {
+                outputFileName = "WLED-ProDVX.apk"
+            }
         }
     }
 

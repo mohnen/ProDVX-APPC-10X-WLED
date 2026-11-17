@@ -40,7 +40,6 @@ class WledHttp(port: Int) : NanoWSD(port) {
         }
         if (session.method == Method.OPTIONS) return cors(newFixedLengthResponse(""))
 
-        val params = session.parms
         var body: JSONObject? = null
         if (session.method == Method.POST || session.method == Method.PUT) {
             val files = HashMap<String, String>()
@@ -49,17 +48,38 @@ class WledHttp(port: Int) : NanoWSD(port) {
                 files["postData"]?.takeIf { it.isNotBlank() }?.let { body = JSONObject(it) }
             } catch (e: Exception) { /* non-JSON or empty body is fine for /win */ }
         }
+        val uri = session.uri
+        val params = session.parms + legacyParams(uri)
 
-        val resp = when (val uri = session.uri) {
-            "/", "/index.htm", "/index.html" -> fixed(Response.Status.OK, "text/html", INDEX_HTML)
-            "/favicon.ico" -> newFixedLengthResponse(Response.Status.NO_CONTENT, "", "")
-            "/json", "/json/state", "/json/info", "/json/eff", "/json/effects",
-            "/json/pal", "/json/palettes", "/json/nodes" -> serveJson(uri, body, params)
-            "/win", "/win/" -> serveWin(params, body)
-            "/settings", "/settings/leds" -> fixed(Response.Status.OK, "text/html", "<html><body>No settings on this device.</body></html>")
+        val resp = when {
+            uri == "/" || uri == "/index.htm" || uri == "/index.html" ->
+                fixed(Response.Status.OK, "text/html", INDEX_HTML)
+            uri == "/favicon.ico" -> newFixedLengthResponse(Response.Status.NO_CONTENT, "", "")
+            uri == "/json" || uri == "/json/state" || uri == "/json/info" ||
+                uri == "/json/eff" || uri == "/json/effects" ||
+                uri == "/json/pal" || uri == "/json/palettes" || uri == "/json/nodes" ->
+                serveJson(uri, body, params)
+            // legacy API: GET /win&T=2&A=255 (params inside the path, no '?')
+            uri == "/win" || uri == "/win/" || uri.startsWith("/win&") ->
+                serveWin(params, body)
+            uri == "/settings" || uri == "/settings/leds" ->
+                fixed(Response.Status.OK, "text/html", "<html><body>No settings on this device.</body></html>")
             else -> fixed(Response.Status.NOT_FOUND, "text/plain", "Not found: $uri")
         }
         return cors(resp)
+    }
+
+    /** WLED's /win API puts params in the path: "/win&T=2&A=255". */
+    private fun legacyParams(uri: String): Map<String, String> {
+        val q = uri.substringAfter('&', "")
+        if (q.isEmpty()) return emptyMap()
+        return q.split('&').mapNotNull {
+            val i = it.indexOf('=')
+            if (i < 0) null else try {
+                it.substring(0, i).uppercase() to
+                    java.net.URLDecoder.decode(it.substring(i + 1), "UTF-8")
+            } catch (e: Exception) { null }
+        }.toMap()
     }
 
     private fun serveJson(uri: String, body: JSONObject?, params: Map<String, String>): Response {
@@ -110,7 +130,9 @@ class WledHttp(port: Int) : NanoWSD(port) {
         if (changed) { WledState.touch(); broadcast() }
 
         val s = WledState.seg
-        val sb = StringBuilder("<vs><ac>${WledState.bri}</ac>")
+        // WLED clients derive "on" from brightness > 0, so report 0 when off
+        val ac = if (WledState.on) WledState.bri else 0
+        val sb = StringBuilder("<vs><ac>$ac</ac>")
         for (i in 0..2) {
             sb.append("<cl>${(s.col[i] shr 16) and 0xFF}</cl><cl>${(s.col[i] shr 8) and 0xFF}</cl><cl>${s.col[i] and 0xFF}</cl>")
         }

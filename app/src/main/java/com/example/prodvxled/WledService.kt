@@ -12,6 +12,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.IBinder
+import fi.iki.elonen.NanoHTTPD
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.Inet4Address
@@ -63,15 +64,47 @@ class WledService : Service() {
             }
         } catch (_: Exception) { }
 
-        http = WledHttp(HTTP_PORT)
-        try {
-            http!!.start()
-            registerNsd("_wled._tcp.")
-            registerNsd("_http._tcp.")
-            WledState.statusText = "API: http://$localIp${if (httpPort != 80) ":$httpPort" else ""}"
-        } catch (e: Exception) {
-            WledState.statusText = "HTTP failed: ${e.message}"
+        // WLED clients verify discovered devices via HTTP on port 80.
+        // 1) try binding :80 directly (works if the kernel allows unprivileged low ports)
+        // 2) otherwise run on :8080 and ask root to redirect :80 -> :8080
+        var bound = tryBind(80)
+        if (!bound) {
+            bound = tryBind(HTTP_PORT)
+            if (bound && !redirectPort80()) {
+                WledState.statusText = "API on http://$localIp:$HTTP_PORT only (:80 redirect failed)"
+            }
         }
+        if (!bound) {
+            WledState.statusText = "HTTP failed to start"
+            return
+        }
+        Thread({ verifyPort80(); registerNsd("_wled._tcp"); registerNsd("_http._tcp") }, "wled-setup").start()
+    }
+
+    private fun tryBind(port: Int): Boolean {
+        val srv = WledHttp(port)
+        return try {
+            srv.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            http = srv
+            httpPort = port
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Probe http://<ip>:80 and report what discovery clients will see. */
+    private fun verifyPort80() {
+        Thread.sleep(500)
+        val port80 = try {
+            java.net.URL("http://$localIp:80/json/info").openConnection().apply {
+                connectTimeout = 1500; readTimeout = 1500
+            }.getInputStream().use { it.readBytes() }.isNotEmpty()
+        } catch (e: Exception) { false }
+        WledState.statusText = if (port80 || httpPort == 80)
+            "API: http://$localIp (mDNS wled-prodvx)"
+        else
+            "API: http://$localIp:$httpPort (:80 not reachable, discovery limited)"
     }
 
     override fun onDestroy() {
@@ -214,14 +247,20 @@ class WledService : Service() {
                 port = httpPort
             }
             val listener = object : NsdManager.RegistrationListener {
-                override fun onServiceRegistered(si: NsdServiceInfo) { }
-                override fun onRegistrationFailed(si: NsdServiceInfo, err: Int) { }
+                override fun onServiceRegistered(si: NsdServiceInfo) {
+                    WledState.statusText = "API: http://$localIp${if (httpPort != 80) ":$httpPort" else ""} (mDNS ${si.serviceName})"
+                }
+                override fun onRegistrationFailed(si: NsdServiceInfo, err: Int) {
+                    WledState.statusText = "mDNS $type failed (err $err) - API on :$httpPort"
+                }
                 override fun onServiceUnregistered(si: NsdServiceInfo) { }
                 override fun onUnregistrationFailed(si: NsdServiceInfo, err: Int) { }
             }
             nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
             nsdRegs += listener
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            WledState.statusText = "mDNS $type failed: ${e.message}"
+        }
     }
 
     // ---------- helpers ----------
@@ -229,7 +268,10 @@ class WledService : Service() {
     private fun redirectPort80(): Boolean {
         if (!WledState.useRoot) return false
         return try {
-            val cmd = "iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT"
+            // PREROUTING covers LAN clients, OUTPUT covers the self-test probe
+            val cmd = "iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT; " +
+                "iptables -t nat -A OUTPUT -o lo -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT; " +
+                "iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT"
             ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start().waitFor() == 0
         } catch (e: Exception) { false }
     }

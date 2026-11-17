@@ -22,8 +22,9 @@ class WledHttp(port: Int) : NanoWSD(port) {
 
     override fun serve(session: IHTTPSession): Response {
         if (session.uri == "/ws") {
-            return if (session.isWebsocketRequested) super.serve(session)
-            else fixed(Response.Status.BAD_REQUEST, "text/plain", "websocket endpoint")
+            // NanoWSD validates the Upgrade header and runs the handshake;
+            // plain GETs get its built-in error response.
+            return super.serve(session)
         }
         if (session.method == Method.OPTIONS) return cors(newFixedLengthResponse(""))
 

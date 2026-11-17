@@ -128,7 +128,7 @@ class MainActivity : Activity() {
                 }
                 override fun onStartTrackingTouch(s: SeekBar) {}
                 override fun onStopTrackingTouch(s: SeekBar) {
-                    prefs.edit().putInt("level", p + 1).apply()
+                    prefs.edit().putInt("level", s.progress + 1).apply()
                 }
             })
         }, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)

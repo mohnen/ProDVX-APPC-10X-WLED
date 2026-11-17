@@ -382,7 +382,8 @@ class BootReceiver : BroadcastReceiver() {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
-            "android.intent.action.QUICKBOOT_POWERON" -> {
+            "android.intent.action.QUICKBOOT_POWERON",
+            "net.mohnen.prodvxled.START_API" -> {
                 val prefs = context.getSharedPreferences("led", Context.MODE_PRIVATE)
                 if (prefs.getBoolean("server", true)) WledService.start(context)
             }

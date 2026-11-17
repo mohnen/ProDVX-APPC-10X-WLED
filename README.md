@@ -72,7 +72,8 @@ launch after a *fresh* install before background components may run; to start
 the API without opening the UI:
 
     adb shell am startservice -n net.mohnen.prodvxled/.WledService
-    # fallback: launch the activity once (leaves the stopped state for good)
+    # alternatives: broadcast to the autostart receiver, or launch once
+    adb shell am broadcast -a net.mohnen.prodvxled.START_API -n net.mohnen.prodvxled/.BootReceiver -f 0x20
     adb shell am start -n net.mohnen.prodvxled/.MainActivity
 
 ## Notes

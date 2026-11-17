@@ -1,4 +1,4 @@
-package com.example.prodvxled
+package net.mohnen.prodvxled
 
 import fi.iki.elonen.NanoWSD
 import org.json.JSONArray

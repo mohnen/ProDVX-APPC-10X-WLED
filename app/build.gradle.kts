@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.prodvxled"
+    namespace = "net.mohnen.prodvxled"
     compileSdk = 34
 
     signingConfigs {
@@ -19,7 +19,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.prodvxled"
+        applicationId = "net.mohnen.prodvxled"
         minSdk = 28          // Android 9
         targetSdk = 28       // Android 9 (sideloaded, so no Play target-SDK requirement)
         versionCode = 1

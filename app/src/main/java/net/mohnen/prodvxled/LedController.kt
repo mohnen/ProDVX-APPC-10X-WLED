@@ -1,4 +1,4 @@
-package com.example.prodvxled
+package net.mohnen.prodvxled
 
 import java.io.BufferedOutputStream
 import java.io.File

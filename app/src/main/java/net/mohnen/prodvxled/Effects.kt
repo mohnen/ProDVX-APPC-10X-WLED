@@ -1,4 +1,4 @@
-package com.example.prodvxled
+package net.mohnen.prodvxled
 
 import android.graphics.Color
 import org.json.JSONArray

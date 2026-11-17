@@ -1,11 +1,11 @@
-package com.example.prodvxled
+package net.mohnen.prodvxled
 
 import java.net.ServerSocket
 import java.net.Socket
 
 /**
  * Tiny TCP relay, intended to be launched as root via:
- *   su -c "CLASSPATH=<apk> app_process /system/bin com.example.prodvxled.RootProxy 80 8080"
+ *   su -c "CLASSPATH=<apk> app_process /system/bin net.mohnen.prodvxled.RootProxy 80 8080"
  *
  * Runs under app_process (not as an Android app component), so it must only use
  * plain java.* APIs. Binds the privileged :80 and forwards each connection to

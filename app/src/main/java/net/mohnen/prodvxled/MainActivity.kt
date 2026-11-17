@@ -1,4 +1,4 @@
-package com.example.prodvxled
+package net.mohnen.prodvxled
 
 import android.app.Activity
 import android.content.SharedPreferences

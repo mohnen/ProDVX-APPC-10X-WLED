@@ -1,4 +1,4 @@
-package com.example.prodvxled
+package net.mohnen.prodvxled
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -339,7 +339,7 @@ class WledService : Service() {
         return try {
             val apk = applicationInfo.sourceDir
             val p = ProcessBuilder("su", "-c",
-                "CLASSPATH='$apk' exec app_process /system/bin com.example.prodvxled.RootProxy 80 $HTTP_PORT")
+                "CLASSPATH='$apk' exec app_process /system/bin net.mohnen.prodvxled.RootProxy 80 $HTTP_PORT")
                 .redirectErrorStream(true).start()
             rootProxy = p
             // drain output so a chatty JVM can't deadlock on a full pipe

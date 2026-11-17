@@ -374,12 +374,18 @@ class WledService : Service() {
     }
 }
 
-/** Autostart the WLED API after boot so the panel behaves like an appliance. */
+/** Autostart the WLED API so the panel behaves like an appliance.
+ *  BOOT_COMPLETED covers normal boots, QUICKBOOT_POWERON some signage
+ *  firmware, MY_PACKAGE_REPLACED restarts the API right after an update. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            val prefs = context.getSharedPreferences("led", Context.MODE_PRIVATE)
-            if (prefs.getBoolean("server", true)) WledService.start(context)
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            "android.intent.action.QUICKBOOT_POWERON" -> {
+                val prefs = context.getSharedPreferences("led", Context.MODE_PRIVATE)
+                if (prefs.getBoolean("server", true)) WledService.start(context)
+            }
         }
     }
 }

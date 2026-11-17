@@ -33,13 +33,14 @@ The app runs as a foreground service and autostarts on boot.
 
 ### Effects
 
-A subset of real WLED effect IDs is implemented: Solid (0), Blink (1),
-Breathe (2), Wipe (3), Rainbow (9), Scan (10), Dual Scan (11), Fade (12),
-Running (15), Twinkle (17), Sparkle (20), Strobe (23), Chase (28),
-Fireworks (42), Rain (43), Fire Flicker (45), Gradient (46), Fire 2012 (66),
-Meteor (76). Unimplemented IDs are reported as `RSVD` and render as Solid.
-Palettes: Default, * Random Cycle, * Color 1, Party, Rainbow, Sunset, Fire,
-Icefire.
+20 effects are implemented with contiguous ids 0-19 (only implemented
+effects are listed, so no `RSVD` entries): Solid, Blink, Breathe, Wipe,
+Rainbow, Scan, Dual Scan, Fade, Running, Twinkle, Sparkle, Strobe, Chase,
+Fireworks, Rain, Fire Flicker, Gradient, Fire 2012, Meteor, Palette.
+13 palettes: Default, * Random Cycle, * Color 1, Rainbow, Party, Sunset,
+Fire, Icefire, Forest, Ocean, Pastel, Lava, Cloud. With a palette != Default,
+Solid renders it as a static gradient and palette-aware effects color their
+primary element from it.
 
 Single segment only (52 LEDs, `start`/`stop` honored).
 
@@ -64,6 +65,15 @@ Output: `app/build/outputs/apk/debug/app-debug.apk` (debug-signed, installable)
 ## Install
 
     adb install -r app-debug.apk
+
+The API service autostarts on boot (`BOOT_COMPLETED` / `QUICKBOOT_POWERON`)
+and right after app updates (`MY_PACKAGE_REPLACED`). Android requires one
+launch after a *fresh* install before background components may run; to start
+the API without opening the UI:
+
+    adb shell am startservice -n net.mohnen.prodvxled/.WledService
+    # fallback: launch the activity once (leaves the stopped state for good)
+    adb shell am start -n net.mohnen.prodvxled/.MainActivity
 
 ## Notes
 
